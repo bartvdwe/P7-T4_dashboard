@@ -186,7 +186,7 @@ with st.sidebar:
 ##     data inladen en waarden berekenen     ####
 #################################################
 # bestand inladen
-df_data = pd.read_csv('/Users/bartv/Documents/school/BMT/project 7/data_meting3.txt', delimiter=',' )
+df_data = pd.read_csv('data_meting3.txt', delimiter=',' )
 
 # data prep functie initiatie
 df_ecg_acc, df_ecg_pieken_es, stappen_per_minuut = prep_data(df_data)
