@@ -1,0 +1,2 @@
+plotly.graph_objects
+scipy.signal
