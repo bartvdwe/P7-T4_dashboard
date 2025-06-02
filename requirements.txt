@@ -1,2 +1,5 @@
-plotly.graph_objects
-scipy.signal
+streamlit==1.34.0
+pandas==2.2.1
+numpy==1.26.4
+plotly==5.22.0
+scipy==1.13.0
