@@ -230,7 +230,8 @@ fig_bpm.add_trace(go.Scatter(
     y=df_ecg_pieken_es['bpm_vloeiend'],
     mode='lines',
     name='Hartslag over tijd',
-    line=dict(color='crimson')
+    line=dict(color='crimson'),
+    hovertemplate='BPM: %{y}<extra></extra>'
 ))
 
 # Zones als horizontale lijnen
@@ -295,7 +296,8 @@ fig_stappen = go.Figure()
 fig_stappen.add_trace(go.Bar(
     x = stappen_per_minuut.index,
     y = stappen_per_minuut['is_een_stap'],
-    name = 'stappen per minuut'
+    name = 'stappen per minuut',
+    hovertemplate='stappen: %{y}<extra></extra>'
     ))
 
 # als uitgebreide mode aan staat
@@ -306,7 +308,8 @@ if knop == True:
         y = stappen_per_minuut['stap_per_min'],
         mode = 'lines',
         name = 'Totaal aantal stappen',
-        marker=dict(color='orange')
+        marker=dict(color='orange'),
+        hovertemplate='stappen: %{y}<extra></extra>'
         ))
     
     # layout aanpassen
@@ -478,12 +481,13 @@ with tab1:
             
             with col5:
                 st.title('Ademhalingsgrafiek')
+                st.info('Let op, dit werkt het best als u stil zit')
                 st.plotly_chart(fig_edr) #EDR figuur
 
             with col6:
-                st.title('Hartritmevariabiliteit (HRV)')
+                st.title('HRV (Hartritmevariabiliteit)')
                 st.plotly_chart(fig2) #hrv figuur
-
+    st.info('Als u meer wilt weten over de gezondheidswaarden kijk dan bij de kennisclips op de help pagina')
 
 ##### tablat 2 #####
 with tab2:
