@@ -5,10 +5,9 @@ import plotly.graph_objects as go
 from scipy.signal import find_peaks
 from scipy.signal import butter, filtfilt
 
-
-########################
-##     functies     ####
-########################
+###################################################
+##     initieren variabelen in sessionstate    ####
+###################################################
 
 if 'leeftijd' not in st.session_state: # toevoegen leeftijd aan sessionstate als deze nog niet is ingevult
     st.session_state.leeftijd = 0
@@ -19,7 +18,12 @@ if 'planning_df' not in st.session_state: # toevoegen aan planning aan sessionst
                      'Stappen doel': [0]*5
                      })
 
+########################
+##     functies     ####
+########################
+
 ##### functie om de ruis uit de ecg te filteren #####
+@st.cache_data
 def bandpass_filter(data, lowcut, highcut, fs, order=3):
     # nyquist is een waarde die de helft van de meetfrequentie neemt, dit is wat accuraat gemeten kan worden
     nyq = 0.5 * fs 
@@ -32,6 +36,7 @@ def bandpass_filter(data, lowcut, highcut, fs, order=3):
     return filtfilt(b, a, data)
 
 ##### lowpass filter om EDR te krijgen #####
+@st.cache_data
 def EDR_filter(data, cutoff, fs, order=3):
     # nyquist is een waarde die de helft van de meetfrequentie neemt, dit is wat accuraat gemeten kan worden
     nyq = 0.5 * fs
@@ -42,6 +47,7 @@ def EDR_filter(data, cutoff, fs, order=3):
     return filtfilt(b, a, data)
 
 ##### piek detectie functie #####
+@st.cache_data
 def pieken_detecteren_dynamisch(df, naam_column, drempel_percentage, interval, minimale_drempel):
     pieken_index = [] #lijst voor index pieken
     
@@ -61,6 +67,55 @@ def pieken_detecteren_dynamisch(df, naam_column, drempel_percentage, interval, m
     # df teruggeven met de pieken 
     return df.iloc[pieken_index]
 
+##### functie voor rmssd voor simulatie bpm #####
+@st.cache_data
+def simulate_rmssd(bpm_series):
+    rr_intervals = 60 / bpm_series
+    diff_rr = np.diff(rr_intervals)
+    rmssd = np.sqrt(np.mean(diff_rr**2)) * 100  
+    return rmssd
+
+##### simulatie bpm hrv voor trendlijn #####
+@st.cache_data
+def bpm_hrv_sim():
+    # Simuleer timestamps per minuut voor 30 dagen
+    n_dagen = 60
+    n_per_day = 24 * 60  # aantal minuten per dag
+    timestamps = pd.date_range(start="2025-05-01", periods=n_dagen * n_per_day, freq="T")
+
+    # Simuleer BPM: basislijn met schommelingen
+    np.random.seed(42)
+    bpm = 70 + 8 * np.sin(np.linspace(0, 10 * np.pi, len(timestamps))) + np.random.normal(0, 3, len(timestamps))
+
+    # Zet in DataFrame
+    df = pd.DataFrame({'timestamp': timestamps, 'bpm': bpm})
+    df['dag'] = df['timestamp'].dt.date
+    df['week'] = df['timestamp'].dt.to_period('W')
+    df['maand'] = df['timestamp'].dt.to_period('M')
+
+    # Bereken daggemiddelden + hrv per dag
+    dag_gem = df.groupby('dag').agg(
+        bpm_gem=('bpm', 'mean'),
+        rmssd=('bpm', lambda x: simulate_rmssd(x.values))
+    ).reset_index()
+
+    # Idem voor weken
+    week_gem = df.groupby('week').agg(
+        bpm_gem=('bpm', 'mean'),
+        rmssd=('bpm', lambda x: simulate_rmssd(x.values))
+    ).reset_index()
+    week_gem['week'] = week_gem['week'].astype(str)
+    
+    # Idem voor maanden
+    maand_gem = df.groupby('maand').agg(
+        bpm_gem=('bpm', 'mean'),
+        rmssd=('bpm', lambda x: simulate_rmssd(x.values))
+    ).reset_index()
+    maand_gem['maand'] = maand_gem['maand'].astype(str)
+    
+    return dag_gem, week_gem, maand_gem
+
+
 ##### data preperatie #####
 @st.cache_data
 def prep_data(df):
@@ -78,7 +133,7 @@ def prep_data(df):
     df["minuut"] = (df["timestamp"] // 60).astype(int)
     
     ##### ECG prep #####
-    df['filtered'] = bandpass_filter(df['sample'], 5, 40, fs=100)
+    df['filtered'] = bandpass_filter(df['sample'], 5, 49, fs=100)
     
     rpieken_drempel = 0.5 
     interval = 250
@@ -109,9 +164,9 @@ def prep_data(df):
 
 
     # stappen detecteren
-    interval = 200
-    stappenteller_drempel = 0.8
-    min_drempel=0.5
+    interval = 250
+    stappenteller_drempel = 0.5
+    min_drempel=0.4
     df_stappen = pieken_detecteren_dynamisch(df, 'genormaliseerd', stappenteller_drempel, interval, min_drempel)
 
     # Cumulatieve stappenteller
@@ -152,7 +207,7 @@ with st.sidebar:
             st.session_state.leeftijd = st.number_input('Leeftijd client invullen',
                                        min_value=1,
                                        max_value=120,
-                                       value=20,
+                                       value= 20,
                                        step=1
                                        )
             # input duur traject
@@ -180,7 +235,10 @@ with st.sidebar:
                 st.session_state["planning_df"] = editable_df
         else:
             st.error("Onjuist wachtwoord.") # error als ww onjuist is
-
+    rangeselectie = st.segmented_control('Range selectie', 
+                                         ['Dag','Week','Maand'], 
+                                         selection_mode = 'single', 
+                                         default='Dag')
 
 #################################################
 ##     data inladen en waarden berekenen     ####
@@ -217,6 +275,8 @@ tot_stappen=df_ecg_acc['stappenteller'].max()
 # rmssd voor hrv meter
 rmssd = np.sqrt(np.mean(np.square(np.diff(df_ecg_pieken_es['tijd_tussen_pieken'])))) * 100
 
+dag_trend, week_trend, maand_trend = bpm_hrv_sim()
+
 #############################
 ##     figuren maken     ####
 #############################
@@ -228,7 +288,6 @@ fig_bpm = go.Figure()
 fig_bpm.add_trace(go.Scatter(
     x=df_ecg_pieken_es['timestamp_vloeiend'],
     y=df_ecg_pieken_es['bpm_vloeiend'],
-    mode='lines',
     name='Hartslag over tijd',
     line=dict(color='crimson'),
     hovertemplate='BPM: %{y}<extra></extra>'
@@ -259,7 +318,6 @@ fig_ecg = go.Figure()
 fig_ecg.add_trace(go.Scatter(
     x=df_ecg_acc['timestamp'],
     y=df_ecg_acc['filtered'],
-    mode='lines',
     name='ECG'
     ))
 
@@ -275,7 +333,7 @@ fig_ecg.add_trace(go.Scatter(
 # layout aanpassen met slider
 fig_ecg.update_layout(
     xaxis_title="Tijd (sec)",
-    yaxis_title="ECG-signaal",
+    yaxis=dict(visible=False),
     xaxis=dict(
         rangeslider=dict(visible=True),
         range=[df_ecg_acc['timestamp'].max()-5, df_ecg_acc['timestamp'].max()],
@@ -306,7 +364,6 @@ if knop == True:
     fig_stappen.add_trace(go.Scatter(
         x = stappen_per_minuut.index,
         y = stappen_per_minuut['stap_per_min'],
-        mode = 'lines',
         name = 'Totaal aantal stappen',
         marker=dict(color='orange'),
         hovertemplate='stappen: %{y}<extra></extra>'
@@ -335,6 +392,27 @@ else:
         yaxis=dict(range=[-1,stappen_per_minuut['is_een_stap'].max() +10 ])
     )
 
+##### EDR figuur #####
+fig_edr = go.Figure()
+
+# EDR grafiek
+fig_edr.add_trace(go.Scatter(
+    x=df_ecg_acc['timestamp'],
+    y=df_ecg_acc['EDR'],
+    name='EDR'
+    ))
+
+# layout aanpassen met slider
+fig_edr.update_layout(
+    title = 'Ademhalingsgrafiek (EDR)',
+    xaxis_title="Tijd (sec)",
+    yaxis=dict(visible=False),
+    xaxis=dict(
+        rangeslider=dict(visible=True),
+        range=[df_ecg_acc['timestamp'].max()-60, df_ecg_acc['timestamp'].max()],
+        type="linear"
+    ))
+
 ##### HRV figuur #####
 fig2 = go.Figure(go.Indicator(
     mode="gauge+number+delta",
@@ -360,26 +438,149 @@ fig2 = go.Figure(go.Indicator(
     }
 ))
 
-##### EDR figuur #####
-fig_edr = go.Figure()
+##### bpm trend figuren #####
+#dag
+fig_dag_bpm =  go.Figure()
 
-# EDR grafiek
-fig_edr.add_trace(go.Scatter(
-    x=df_ecg_acc['timestamp'],
-    y=df_ecg_acc['EDR'],
-    mode='lines',
-    name='EDR'
+fig_dag_bpm.add_trace(go.Scatter(
+    x=dag_trend['dag'],
+    y=dag_trend['bpm_gem']
     ))
 
-# layout aanpassen met slider
-fig_edr.update_layout(
-    xaxis_title="Tijd (sec)",
-    yaxis_title="EDR-signaal",
-    xaxis=dict(
-        rangeslider=dict(visible=True),
-        range=[df_ecg_acc['timestamp'].max()-60, df_ecg_acc['timestamp'].max()],
-        type="linear"
+fig_dag_bpm.add_trace(go.Scatter(
+    x=dag_trend['dag'],
+    y=dag_trend['bpm_gem'],
+    mode='markers',
+    marker=dict(color='crimson', size=3)
     ))
+
+fig_dag_bpm.update_layout(
+    title='BPM trend per dag',
+    xaxis_title='Dag',
+    yaxis_title='BPM',
+    yaxis=dict(range=[-1, 220]),
+    height=350,
+    showlegend = False
+    )
+
+#week
+fig_week_bpm =  go.Figure()
+
+fig_week_bpm.add_trace(go.Scatter(
+    x=week_trend['week'],
+    y=week_trend['bpm_gem']
+    ))
+
+fig_week_bpm.add_trace(go.Scatter(
+    x=week_trend['week'],
+    y=week_trend['bpm_gem'],
+    mode='markers',
+    marker=dict(color='crimson', size=3)
+    ))
+
+fig_week_bpm.update_layout(
+    title='BPM trend per week',
+    xaxis_title='Week',
+    yaxis_title='BPM',
+    yaxis=dict(range=[-1, 220]),
+    height=350,
+    showlegend = False
+    )
+
+#maand
+fig_maand_bpm =  go.Figure()
+
+fig_maand_bpm.add_trace(go.Scatter(
+    x=maand_trend['maand'],
+    y=maand_trend['bpm_gem']
+    ))
+
+fig_maand_bpm.add_trace(go.Scatter(
+    x=maand_trend['maand'],
+    y=maand_trend['bpm_gem'],
+    mode='markers',
+    marker=dict(color='crimson', size=3)
+    ))
+
+fig_maand_bpm.update_layout(
+    title='BPM trend per maand',
+    xaxis_title='Maand',
+    yaxis_title='BPM',
+    yaxis=dict(range=[-1, 220]),
+    height=350,
+    showlegend = False
+    )
+
+##### HRV trend figuren
+#dag
+fig_dag_hrv = go.Figure()
+
+fig_dag_hrv.add_trace(go.Scatter(
+    x=dag_trend['dag'],
+    y=dag_trend['rmssd']))
+
+fig_dag_hrv.add_trace(go.Scatter(
+    x=dag_trend['dag'],
+    y=dag_trend['rmssd'],
+    mode='markers',
+    marker=dict(color='green', size=3)
+    ))
+
+fig_dag_hrv.update_layout(
+    title='HRV trend per dag',
+    xaxis_title='Dag',
+    yaxis_title='HRV',
+    yaxis=dict(range=[-1, 100]),
+    height=250,
+    showlegend = False
+    )
+
+#week
+fig_week_hrv = go.Figure()
+
+fig_week_hrv.add_trace(go.Scatter(
+    x=week_trend['week'],
+    y=week_trend['rmssd']))
+
+fig_week_hrv.add_trace(go.Scatter(
+    x=week_trend['week'],
+    y=week_trend['rmssd'],
+    mode='markers',
+    marker=dict(color='green', size=3)
+    ))
+
+fig_week_hrv.update_layout(
+    title='HRV trend per week',
+    xaxis_title='Week',
+    yaxis_title='HRV',
+    yaxis=dict(range=[-1, 100]),
+    height=250,
+    showlegend = False
+    )
+
+#maand
+fig_maand_hrv = go.Figure()
+
+fig_maand_hrv.add_trace(go.Scatter(
+    x=maand_trend['maand'],
+    y=maand_trend['rmssd']))
+
+fig_maand_hrv.add_trace(go.Scatter(
+    x=maand_trend['maand'],
+    y=maand_trend['rmssd'],
+    mode='markers',
+    marker=dict(color='green', size=3)
+    ))
+
+fig_maand_hrv.update_layout(
+    title='HRV trend per maand',
+    xaxis_title='Maand',
+    yaxis_title='HRV',
+    yaxis=dict(range=[-1, 100]),
+    height=250,
+    showlegend = False
+    )
+
 ############################
 ##     indeling app     ####
 ############################
@@ -408,12 +609,12 @@ stappen_doel = st.session_state['planning_df'].loc[week_index, 'Stappen doel'].v
 nog_tot_doel = stappen_doel - tot_stappen
 # teksten maken voor tekst bij stappenteller
 if nog_tot_doel>0:
-    delta_stap = f"nog {nog_tot_doel} tot je doel"
+    delta_stap = f"nog {nog_tot_doel} stappen tot je doel"
 else:
-    delta_stap = f"{nog_tot_doel} over je doel heen"
+    delta_stap = f"{nog_tot_doel} stappen over je doel heen"
 
 hr_zone_doel = st.session_state['planning_df'].loc[week_index, 'Hr-zone'].values[0] # HR zone selecite
-zone_max = zones.loc[hr_zone_doel,'Zone'] # max hartslagzone vinden
+zone_max = zones.loc[hr_zone_doel,'Zone'].astype(int) # max hartslagzone vinden
 
 ##### tablat 1 #####
 with tab1:
@@ -432,7 +633,7 @@ with tab1:
             with cole:
                 st.write('') #witregels
                 st.write('')
-                st.write(f'Probeer onder de {zone_max} BPM te blijven') #hr zone doel neerzeten
+                st.write(f'Streefwaarde: onder {zone_max} BPM') #hr zone doel neerzeten
             # live BPM
             st.metric(label='', 
                       value=f"{laatste_bpm} BPM (slagen per minuut)", 
@@ -466,12 +667,13 @@ with tab1:
         
         with col3:
             st.title('ECG')
+            st.write('Een ECG meet de elektrische activiteit van het hart en laat zien hoe het ritme en de hartslagen in de tijd verlopen.')
             st.plotly_chart(fig_ecg) #ecg figuur
             
 
         with col4:
             st.title('Planning')
-            st.subheader("Jouw planning")
+            st.write('Dit is de planning die voor u is opgesteld.')
             st.dataframe(st.session_state["planning_df"], use_container_width=True) # planning
     
     # als uitgebreide mode aan staat kan de EDR en HRV gezien worden
@@ -481,17 +683,19 @@ with tab1:
             
             with col5:
                 st.title('Ademhalingsgrafiek')
+                st.write('Via kleine variaties in het ECG-signaal kan ook het ademhalingspatroon worden afgeleid, zonder aparte sensor.')
                 st.info('Let op, dit werkt het best als u stil zit')
                 st.plotly_chart(fig_edr) #EDR figuur
 
             with col6:
                 st.title('HRV (Hartritmevariabiliteit)')
+                st.write('HRV geeft de variatie in tijd tussen hartslagen weer en is een maat voor balans tussen inspanning en herstel.')
                 st.plotly_chart(fig2) #hrv figuur
     st.info('Als u meer wilt weten over de gezondheidswaarden kijk dan bij de kennisclips op de help pagina')
 
 ##### tablat 2 #####
 with tab2:
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     # kennisclips
     with col1:
         st.header("Kennisclips")
@@ -503,9 +707,13 @@ with tab2:
         st.text('Wil je meer weten over hartslagzones?')
         st.video("https://www.youtube.com/watch?v=Mh5oNMDCucQ&pp=ygUNaGFydHNsYWd6b25lcw%3D%3D")
             
-        
+    with col3:
+        st.header('')
+        st.text('Ademhalingsoefening')
+        st.video("https://youtu.be/5RDG99jFKBY?si=SO7cFeu6rSWg1lp4")
+    
     if knop == True:
-        with col3:
+        with col4:
             st.header('')
             st.text('Wil je meer weten over HRV?')
             st.video("https://youtu.be/zUyuUoU7lAQ?si=3AzaetMN8u7gqaX5&t=7")
@@ -516,8 +724,23 @@ with tab2:
     if prompt:
         st.write(f"Gebruiker: {prompt}")
             
-            
-            
-            
+##### sidebar trend figuren #####
+with st.sidebar:
+    # BPM figuren
+    if rangeselectie == 'Dag':
+        st.plotly_chart(fig_dag_bpm)
+    elif rangeselectie == 'Week':
+        st.plotly_chart(fig_week_bpm)
+    else:
+        st.plotly_chart(fig_maand_bpm)
+        
+    # HRV figuren als knop aan staat
+    if knop == True:
+        if rangeselectie == 'Dag':
+            st.plotly_chart(fig_dag_hrv)
+        elif rangeselectie == 'Week':
+            st.plotly_chart(fig_week_hrv)
+        else:
+            st.plotly_chart(fig_maand_hrv)
             
             
