@@ -37,7 +37,7 @@ def bandpass_filter(data, lowcut, highcut, fs, order=3):
 
 ##### lowpass filter om EDR te krijgen #####
 @st.cache_data
-def EDR_filter(data, cutoff, fs, order=3):
+def lowpass_filter(data, cutoff, fs, order=3):
     # nyquist is een waarde die de helft van de meetfrequentie neemt, dit is wat accuraat gemeten kan worden
     nyq = 0.5 * fs
     # de cutoff maken voor de filter
@@ -96,7 +96,7 @@ def bpm_hrv_sim():
     # Bereken daggemiddelden + hrv per dag
     dag_gem = df.groupby('dag').agg(
         bpm_gem=('bpm', 'mean'),
-        rmssd=('bpm', lambda x: simulate_rmssd(x.values))
+        rmssd=('bpm', lambda x: simulate_rmssd(x.values)) # lambda zorgt ervoor dat een functie gebruikt kan worden binnen .agg()
     ).reset_index()
 
     # Idem voor weken
@@ -104,7 +104,7 @@ def bpm_hrv_sim():
         bpm_gem=('bpm', 'mean'),
         rmssd=('bpm', lambda x: simulate_rmssd(x.values))
     ).reset_index()
-    week_gem['week'] = week_gem['week'].astype(str)
+    week_gem['week'] = week_gem['week'].astype(str) #de weken omzetten naar string omdat het anders niet geplot kan worden 
     
     # Idem voor maanden
     maand_gem = df.groupby('maand').agg(
@@ -182,7 +182,7 @@ def prep_data(df):
     
     ##### edr #####
     # EDR wordt opgezet aan de hand van ecg filteren zodat alleen waarden onder 0.5hz worden gezien
-    EDR = EDR_filter(df['sample'], 0.5, fs=100)
+    EDR = lowpass_filter(df['sample'], 0.5, fs=100)
     df['EDR'] = EDR - EDR.mean() #EDR normaliseren
     return df, df_ecg_pieken, df_spm
 
@@ -451,7 +451,9 @@ fig_dag_bpm.add_trace(go.Scatter(
     x=dag_trend['dag'],
     y=dag_trend['bpm_gem'],
     mode='markers',
-    marker=dict(color='crimson', size=3)
+    marker=dict(color='crimson', size=3),
+    hovertemplate='Datum: %{x|%d-%m}<br>Gem. BPM: %{y:.0f}<extra></extra>' 
+    # de naam die je ziet als je over de punten gaat, het 'extra' gedeelte zorgt ervoor dat er niet nog extra dingen bij staan
     ))
 
 fig_dag_bpm.update_layout(
@@ -475,7 +477,8 @@ fig_week_bpm.add_trace(go.Scatter(
     x=week_trend['week'],
     y=week_trend['bpm_gem'],
     mode='markers',
-    marker=dict(color='crimson', size=3)
+    marker=dict(color='crimson', size=3),
+    hovertemplate='Week: %{x}<br>Gem. BPM: %{y:.0f}<extra></extra>'
     ))
 
 fig_week_bpm.update_layout(
@@ -499,7 +502,8 @@ fig_maand_bpm.add_trace(go.Scatter(
     x=maand_trend['maand'],
     y=maand_trend['bpm_gem'],
     mode='markers',
-    marker=dict(color='crimson', size=3)
+    marker=dict(color='crimson', size=3),
+    hovertemplate='Maand: %{x|%m}<br>Gem. BPM: %{y:.0f}<extra></extra>'
     ))
 
 fig_maand_bpm.update_layout(
@@ -523,7 +527,8 @@ fig_dag_hrv.add_trace(go.Scatter(
     x=dag_trend['dag'],
     y=dag_trend['rmssd'],
     mode='markers',
-    marker=dict(color='green', size=3)
+    marker=dict(color='green', size=3),
+    hovertemplate='Datum: %{x|%d-%m}<br>Gem. HRV: %{y:.0f}<extra></extra>'
     ))
 
 fig_dag_hrv.update_layout(
@@ -546,7 +551,8 @@ fig_week_hrv.add_trace(go.Scatter(
     x=week_trend['week'],
     y=week_trend['rmssd'],
     mode='markers',
-    marker=dict(color='green', size=3)
+    marker=dict(color='green', size=3),
+    hovertemplate='Week: %{x}<br>Gem. HRV: %{y:.0f}<extra></extra>'
     ))
 
 fig_week_hrv.update_layout(
@@ -569,7 +575,8 @@ fig_maand_hrv.add_trace(go.Scatter(
     x=maand_trend['maand'],
     y=maand_trend['rmssd'],
     mode='markers',
-    marker=dict(color='green', size=3)
+    marker=dict(color='crimson', size=3),
+    hovertemplate='Maand: %{x|%m}<br>Gem. HRV: %{y:.0f}<extra></extra>'
     ))
 
 fig_maand_hrv.update_layout(
